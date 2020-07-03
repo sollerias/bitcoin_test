@@ -14,7 +14,7 @@ const bip39 = require('bip39');
 const hdkey = require('hdkey');
 const createHash = require('create-hash');
 const bitcoin = require('bitcoinjs-lib');
-const bs58check = require('bs58check');
+// const bs58check = require('bs58check');
 
 const currentNetwork = bitcoin.networks.testnet;
 
@@ -23,48 +23,64 @@ const createWallet = async () => {
   // const mnemonic = "gentle mutual speak consider mandate kingdom cash
   // explain soul exile cabin squeeze";
   const seed = await bip39.mnemonicToSeed(mnemonic); // creates seed buffer
-  console.log(`Seed: ${seed}`);
-  console.log(`mnemonic: ${mnemonic}`);
+  // console.log(`Seed: ${seed}`);
+  // console.log(`mnemonic: ${mnemonic}`);
 
   const root = hdkey.fromMasterSeed(seed);
-  const masterPrivateKey = root.privateKey.toString('hex');
-  console.log(`masterPrivateKey: ${masterPrivateKey}`);
+  // const masterPrivateKey = root.privateKey.toString('hex');
+  // console.log(`masterPrivateKey: ${masterPrivateKey}`);
 
   const addrnode = root.derive("m/44'/0'/0'/0/0");
   // eslint-disable-next-line no-underscore-dangle
-  console.log(`addrnodePublicKey: ${addrnode._publicKey}`);
+  // console.log(`addrnodePublicKey: ${addrnode._publicKey}`);
 
   // eslint-disable-next-line no-underscore-dangle
   const step1 = addrnode._publicKey;
   const step2 = createHash('sha256').update(step1).digest();
   const step3 = createHash('rmd160').update(step2).digest();
   const step4 = Buffer.allocUnsafe(21);
-  console.log(`step1: ${step1} | step2: ${step2} | step3: ${step3} | step4: ${step4}`);
+  // console.log(`step1: ${step1} | step2: ${step2} | step3: ${step3} | step4: ${step4}`);
 
   // step4.writeUInt8(0x00, 0); // 0x00 for mainnet
   step4.writeUInt8(0x6f, 0); // 0x6f for testnet
   step3.copy(step4, 1); // step4 now holds the extended RIPMD-160 result
-  const step9 = bs58check.encode(step4);
-  console.log(`Base58Check: ${step9}`);
+  // const step9 = bs58check.encode(step4);
+  // console.log(`Base58Check: ${step9}`);
+  /*
+  Mainnet
+  pubKeyHash: 0x00,
+  Testnet
+  pubKeyHash: 0x6f,
+*/
 };
 
-// createWallet();
+createWallet();
 
+/**
+ * sendTransaction() - prepare and send bitcoin transaction.
+ */
 const sendTransaction = () => {
   // Import the private key of the Bitcoin address
+  /**
+   * Получить WIF - privatekey из Bitcoin Core:
+   * Окно - > Консоль.Вводим команду:
+   * dumpprivkey tb1qksy0zdwsp3wuudx59p54hj6ew3q58hzdmm4m2p
+   */
+  // currentNetwork - необходимо указать, если сеть testnet.
   const bratishkaKey = bitcoin.ECPair.fromWIF('cU1C5dEQ6mHEVyTf8UNoKypd9AESr3iQNr9EiW1PMjYwjYZMuV15', currentNetwork);
+  // bratishkaAddress - адрес из Bitcoin Core необходимо зашифровать, используя
+  // открытый ключ.
   const bratishkaAddress = bitcoin.payments.p2pkh({
     pubkey: bratishkaKey.publicKey,
   }).address;
-  const bratishkaPublicKey = bratishkaKey.publicKey.toString('hex');
-  console.log(bratishkaAddress);
-  console.log('public key:', bratishkaPublicKey);
-
+  // console.log(bratishkaAddress);
+  // receivingWalletKey - адрес из Bitcoin Core необходимо зашифровать, используя
+  // открытый ключ.
   const receivingWalletKey = bitcoin.ECPair.fromWIF('cPFCKo2agVDxQDMQwHBmNkgcG8WtUpotnivNm5bcyKEdEwKUtyFg', currentNetwork);
   const receivingWalletAddress = bitcoin.payments.p2pkh({
     pubkey: receivingWalletKey.publicKey,
   }).address;
-  console.log(receivingWalletAddress);
+  // console.log(receivingWalletAddress);
 
   // const {
   //   address,
@@ -73,11 +89,27 @@ const sendTransaction = () => {
   // });
   // console.log(address);
 
+  // Для формирования транзакции необходимо работать с классом Psbt;
   const psbt = new bitcoin.Psbt();
+  // Добавляем вход, с которого пойдёт транзакция
   psbt.addInput({
     // if hash is string, txid, if hash is Buffer, is reversed compared to txid
     hash: '205720de04e7255b21d65aac39711cc532d903c3cd5c268b000e164b3517a215',
     index: 0,
+    /**
+     * В этом моменте необходимо определиться, транзакция SegWit или Нет.
+     * Данную информацию я смог найти из данного источника:
+     * https: //live.blockcypher.com/btc-testnet
+     * В нем по хэшу нашел транзакцию.Детализация выхода показала JSON, предоставленный в файле
+     *  ./mixins/transactionExample.json.
+     * В нем ищем поле txs - > outputs - > наш адрес.
+     * В моём случае - tb1qksy0zdwsp3wuudx59p54hj6ew3q58hzdmm4m2p
+     * Script type для этого поля: "script_type": "pay-to-witness-pubkey-hash"
+     * Соответственно, нам необходима unspent transaction типа witnessUtxo.
+     * scriptPubKey для неё беру из этого же JSON,
+     * поля "script": "0014b408f135d00c5dce34d428695bcb59744143dc4d".
+     * Value - из поля "value": 1000000.
+     */
     // non-segwit inputs now require passing the whole previous tx as Buffer
     /*
     nonWitnessUtxo: Buffer.from(
@@ -111,6 +143,7 @@ const sendTransaction = () => {
     //   redeemScript. A Buffer of the redeemScript for P2SH
     //   witnessScript. A Buffer of the witnessScript for P2WSH
   });
+  // Если выходов несколько, указываю их последовательно
   psbt.addOutput({
     address: bratishkaAddress,
     value: 900000,
@@ -119,20 +152,17 @@ const sendTransaction = () => {
     address: receivingWalletAddress,
     value: 70000,
   });
+  // Вход у меня будет нулевой, подписанный ключом для
+  // кошелька, из которого идет оплата
   psbt.signInput(0, bratishkaKey);
   psbt.validateSignaturesOfInput(0);
   psbt.finalizeAllInputs();
+  // transactionHash - необходим для осуществления транзакции через RPC
   const transactionHash = psbt.extractTransaction().toHex();
-  console.log('transactionHash: ', transactionHash);
+  // console.log('transactionHash: ', transactionHash);
   sendRawTransaction(transactionHash);
 };
 
 sendTransaction();
-/*
-  Mainnet
-  pubKeyHash: 0x00,
-  Testnet
-  pubKeyHash: 0x6f,
-*/
 
 module.exports = app;
